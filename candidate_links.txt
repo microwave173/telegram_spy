@@ -1,0 +1,4 @@
+# Optional manually collected public candidates from TGStat/directories.
+# One per line, for example:
+# @python
+# https://t.me/pythontelegrambotgroup

@@ -1,0 +1,12 @@
+.DS_Store
+__pycache__/
+*.pyc
+
+keys.txt
+bot_key.txt
+telethon_user_session.session
+telethon_user_session.session-journal
+
+bak/
+reports/
+report.txt

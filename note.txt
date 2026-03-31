@@ -1,0 +1,1 @@
+python3 telethon_search_and_join_groups.py --max-joins 5
