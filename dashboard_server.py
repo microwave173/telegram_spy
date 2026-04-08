@@ -8,13 +8,13 @@ import os
 import re
 import subprocess
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from dashboard_state import load_dashboard_read_state, load_dashboard_state, mark_chat_reports_read
+from dashboard_state import clear_listen_events, load_dashboard_read_state, load_dashboard_state, mark_chat_reports_read
 
 BASE_DIR = Path(__file__).resolve().parent
 REPORTS_DIR = BASE_DIR / "reports"
@@ -23,6 +23,9 @@ PIPELINE_SCRIPT_PATH = BASE_DIR / "run_pipeline.sh"
 PIPELINE_LOG_PATH = BASE_DIR / "dashboard_pipeline.log"
 KEYWORDS_PATH = BASE_DIR / "keywords.txt"
 DETECTOR_DESCRIPTION_PATH = BASE_DIR / "detector_description.txt"
+LISTEN_TARGETS_PATH = BASE_DIR / "listen_targets.json"
+SEEN_GROUPS_PATH = BASE_DIR / "seen_groups.json"
+TELETHON_TALK_PATH = BASE_DIR / "telethon_talk.py"
 ALLOWED_STEPS = {"collect", "analyze", "listen"}
 PIPELINE_LOG_TAIL_CHARS = 30000
 
@@ -36,6 +39,7 @@ PIPELINE_STATE = {
     "exit_code": None,
     "log_path": str(PIPELINE_LOG_PATH),
     "max_joins": None,
+    "group_buffer_max_messages": None,
 }
 PIPELINE_PROCESS: subprocess.Popen | None = None
 
@@ -73,10 +77,26 @@ def parse_report_file(path: Path) -> dict:
     }
 
 
-def build_analyze_groups() -> list[dict]:
-    read_state = load_dashboard_read_state()
-    last_read_at_by_chat = read_state.get("last_read_at_by_chat", {})
+def parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
+
+def normalize_group_chat_id(value: int) -> int:
+    if value > 0:
+        return int(f"-100{value}")
+    return value
+
+
+def load_reports() -> list[dict]:
     reports = []
     if REPORTS_DIR.exists():
         for path in sorted(REPORTS_DIR.glob("*.txt")):
@@ -84,8 +104,35 @@ def build_analyze_groups() -> list[dict]:
                 reports.append(parse_report_file(path))
             except Exception:
                 continue
-
     reports.sort(key=lambda item: item["generated_at"], reverse=True)
+    return reports
+
+
+def load_json_file(path: Path, default: dict) -> dict:
+    if not path.exists():
+        return default.copy()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            merged = default.copy()
+            merged.update(data)
+            return merged
+    except Exception:
+        pass
+    return default.copy()
+
+
+def load_listen_targets() -> dict:
+    return load_json_file(LISTEN_TARGETS_PATH, {"private_chat_ids": [], "group_chat_ids": []})
+
+
+def load_seen_groups() -> dict:
+    return load_json_file(SEEN_GROUPS_PATH, {"processed_groups": {}, "all_groups": []})
+
+
+def build_analyze_groups(reports: list[dict]) -> list[dict]:
+    read_state = load_dashboard_read_state()
+    last_read_at_by_chat = read_state.get("last_read_at_by_chat", {})
 
     grouped = {}
     for report in reports:
@@ -113,14 +160,131 @@ def build_analyze_groups() -> list[dict]:
     return groups
 
 
+def build_monitored_groups(
+    collect_groups: list[dict],
+    reports: list[dict],
+    window_start: datetime | None,
+) -> list[dict]:
+    listen_targets = load_listen_targets()
+    seen_groups = load_seen_groups()
+
+    title_by_chat_id = {}
+    username_by_chat_id = {}
+
+    for entry in collect_groups:
+        chat_id = int(entry.get("chat_id", 0) or 0)
+        if not chat_id:
+            continue
+        title_by_chat_id[chat_id] = entry.get("title") or title_by_chat_id.get(chat_id)
+        username_by_chat_id[chat_id] = entry.get("username") or username_by_chat_id.get(chat_id)
+
+    for report in reports:
+        chat_id = int(report.get("chat_id", 0) or 0)
+        if not chat_id:
+            continue
+        title_by_chat_id[chat_id] = report.get("chat_title") or title_by_chat_id.get(chat_id)
+
+    processed_groups = seen_groups.get("processed_groups", {})
+    if isinstance(processed_groups, dict):
+        for item in processed_groups.values():
+            if not isinstance(item, dict):
+                continue
+            raw_id = item.get("id")
+            if raw_id is None:
+                continue
+            chat_id = normalize_group_chat_id(int(raw_id))
+            title_by_chat_id[chat_id] = item.get("title") or title_by_chat_id.get(chat_id)
+            username_by_chat_id[chat_id] = item.get("username") or username_by_chat_id.get(chat_id)
+
+    collect_by_chat_id = {}
+    for entry in collect_groups:
+        chat_id = int(entry.get("chat_id", 0) or 0)
+        if not chat_id:
+            continue
+        collect_by_chat_id.setdefault(chat_id, []).append(entry)
+
+    monitored_groups = []
+    for raw_chat_id in listen_targets.get("group_chat_ids", []):
+        chat_id = normalize_group_chat_id(int(raw_chat_id))
+        entries = collect_by_chat_id.get(chat_id, [])
+        latest_entry = max(entries, key=lambda item: item.get("timestamp", ""), default=None)
+        latest_entry_dt = parse_iso_datetime(latest_entry.get("timestamp")) if latest_entry else None
+        added_this_run = bool(latest_entry_dt and window_start and latest_entry_dt >= window_start)
+        monitored_groups.append(
+            {
+                "chat_id": chat_id,
+                "title": title_by_chat_id.get(chat_id) or str(chat_id),
+                "username": username_by_chat_id.get(chat_id) or "",
+                "added_this_run": added_this_run,
+                "last_added_at": latest_entry.get("timestamp") if latest_entry else "",
+                "source_keywords": latest_entry.get("source_keywords", []) if latest_entry else [],
+                "source_links": latest_entry.get("source_links", []) if latest_entry else [],
+            }
+        )
+
+    monitored_groups.sort(
+        key=lambda item: (
+            0 if item["added_this_run"] else 1,
+            item["title"].lower(),
+        )
+    )
+    return monitored_groups
+
+
+def build_metrics(
+    collect_groups: list[dict],
+    listen_events: list[dict],
+    reports: list[dict],
+    monitored_groups: list[dict],
+    pipeline_status: dict,
+) -> dict:
+    window_start = parse_iso_datetime(pipeline_status.get("started_at"))
+    window_end = parse_iso_datetime(pipeline_status.get("finished_at")) or datetime.now(timezone.utc)
+
+    def in_window(value: str | None) -> bool:
+        if window_start is None:
+            return False
+        parsed = parse_iso_datetime(value)
+        if parsed is None:
+            return False
+        return parsed >= window_start
+
+    collect_this_run = [item for item in collect_groups if in_window(item.get("timestamp"))]
+    listen_incoming_this_run = [
+        item for item in listen_events if item.get("event_type") == "incoming" and in_window(item.get("timestamp"))
+    ]
+    reports_this_run = [item for item in reports if in_window(item.get("generated_at"))]
+    active_group_ids = {int(item.get("chat_id", 0) or 0) for item in listen_incoming_this_run if item.get("chat_id")}
+
+    duration_seconds = max((window_end - window_start).total_seconds(), 1.0) if window_start else 0.0
+    hit_rate_per_hour = (len(reports_this_run) * 3600.0 / duration_seconds) if duration_seconds else 0.0
+
+    return {
+        "monitored_groups_total": len(monitored_groups),
+        "collect_new_groups_this_run": len(collect_this_run),
+        "reports_this_run": len(reports_this_run),
+        "report_hit_rate_per_hour": round(hit_rate_per_hour, 2),
+        "incoming_messages_this_run": len(listen_incoming_this_run),
+        "active_groups_this_run": len(active_group_ids),
+        "window_started_at": pipeline_status.get("started_at"),
+        "window_finished_at": pipeline_status.get("finished_at"),
+    }
+
+
 def build_dashboard_payload() -> dict:
     dashboard_state = load_dashboard_state()
     collect_groups = list(reversed(dashboard_state.get("collect_groups", [])))
     listen_events = list(reversed(dashboard_state.get("listen_events", [])))
+    reports = load_reports()
+    pipeline_status = get_pipeline_status()
+    window_start = parse_iso_datetime(pipeline_status.get("started_at"))
+    monitored_groups = build_monitored_groups(collect_groups, reports, window_start)
     return {
         "collect_groups": collect_groups,
-        "analyze_groups": build_analyze_groups(),
+        "monitored_groups": monitored_groups,
+        "analyze_groups": build_analyze_groups(reports),
         "listen_events": listen_events,
+        "metrics": build_metrics(collect_groups, listen_events, reports, monitored_groups, pipeline_status),
     }
 
 
@@ -148,11 +312,26 @@ def extract_default_max_joins() -> int:
     return int(match.group(1))
 
 
+def extract_default_group_buffer_max_messages() -> int:
+    try:
+        content = TELETHON_TALK_PATH.read_text(encoding="utf-8")
+    except Exception:
+        return 8
+    match = re.search(
+        r'GROUP_BUFFER_MAX_MESSAGES\s*=\s*int\(os\.getenv\("TELEGRAM_GROUP_BUFFER_MAX_MESSAGES",\s*"(\d+)"\)\)',
+        content,
+    )
+    if not match:
+        return 8
+    return int(match.group(1))
+
+
 def build_startup_config_payload() -> dict:
     return {
         "keywords_text": read_text_file(KEYWORDS_PATH),
         "detector_description_text": read_text_file(DETECTOR_DESCRIPTION_PATH),
         "default_max_joins": extract_default_max_joins(),
+        "default_group_buffer_max_messages": extract_default_group_buffer_max_messages(),
         "collect_auto_join_enabled": True,
     }
 
@@ -181,13 +360,18 @@ def read_pipeline_log() -> str:
     return text[-PIPELINE_LOG_TAIL_CHARS:]
 
 
-def start_pipeline(steps: list[str], max_joins: int | None = None) -> dict:
+def start_pipeline(
+    steps: list[str],
+    max_joins: int | None = None,
+    group_buffer_max_messages: int | None = None,
+) -> dict:
     global PIPELINE_PROCESS
     with PIPELINE_LOCK:
         refresh_pipeline_state_locked()
         if PIPELINE_STATE["running"]:
             raise RuntimeError("pipeline is already running")
 
+        clear_listen_events()
         PIPELINE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         started_at = datetime.utcnow().isoformat() + "Z"
         PIPELINE_LOG_PATH.write_text(
@@ -201,6 +385,8 @@ def start_pipeline(steps: list[str], max_joins: int | None = None) -> dict:
             cmd.extend(["--max-joins", str(max_joins)])
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
+        if group_buffer_max_messages is not None:
+            env["TELEGRAM_GROUP_BUFFER_MAX_MESSAGES"] = str(group_buffer_max_messages)
         PIPELINE_PROCESS = subprocess.Popen(
             cmd,
             cwd=str(BASE_DIR),
@@ -215,6 +401,7 @@ def start_pipeline(steps: list[str], max_joins: int | None = None) -> dict:
         PIPELINE_STATE["pid"] = PIPELINE_PROCESS.pid
         PIPELINE_STATE["exit_code"] = None
         PIPELINE_STATE["max_joins"] = max_joins
+        PIPELINE_STATE["group_buffer_max_messages"] = group_buffer_max_messages
         return dict(PIPELINE_STATE)
 
 
@@ -290,6 +477,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 body = json.loads(raw_body.decode("utf-8"))
                 steps = body.get("steps", [])
                 max_joins = body.get("max_joins")
+                group_buffer_max_messages = body.get("group_buffer_max_messages")
                 if not isinstance(steps, list) or not steps:
                     self._send_json({"ok": False, "error": "steps required"}, status=400)
                     return
@@ -302,6 +490,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     if max_joins < 0:
                         self._send_json({"ok": False, "error": "max_joins must be >= 0"}, status=400)
                         return
+                if group_buffer_max_messages is not None:
+                    try:
+                        group_buffer_max_messages = int(group_buffer_max_messages)
+                    except Exception:
+                        self._send_json({"ok": False, "error": "group_buffer_max_messages must be an integer"}, status=400)
+                        return
+                    if group_buffer_max_messages <= 0:
+                        self._send_json({"ok": False, "error": "group_buffer_max_messages must be > 0"}, status=400)
+                        return
                 normalized_steps = []
                 for step in steps:
                     if step not in ALLOWED_STEPS:
@@ -309,7 +506,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         return
                     if step not in normalized_steps:
                         normalized_steps.append(step)
-                status_payload = start_pipeline(normalized_steps, max_joins=max_joins)
+                status_payload = start_pipeline(
+                    normalized_steps,
+                    max_joins=max_joins,
+                    group_buffer_max_messages=group_buffer_max_messages,
+                )
                 self._send_json({"ok": True, "status": status_payload})
                 return
             except RuntimeError as e:

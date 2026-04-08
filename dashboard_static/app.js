@@ -6,6 +6,7 @@ const stepCollect = document.getElementById("step-collect");
 const stepAnalyze = document.getElementById("step-analyze");
 const stepListen = document.getElementById("step-listen");
 const maxJoinsInput = document.getElementById("max-joins");
+const groupBufferMaxMessagesInput = document.getElementById("group-buffer-max-messages");
 const saveConfigButton = document.getElementById("save-config-button");
 const startButton = document.getElementById("start-button");
 const pipelineStatus = document.getElementById("pipeline-status");
@@ -13,6 +14,8 @@ const configStatus = document.getElementById("config-status");
 const keywordsText = document.getElementById("keywords-text");
 const detectorText = document.getElementById("detector-text");
 const pipelineLog = document.getElementById("pipeline-log");
+const metricsGrid = document.getElementById("metrics-grid");
+const MAX_LISTEN_EVENTS = 12;
 let openAnalyzeChatId = null;
 
 function formatTime(value) {
@@ -32,7 +35,7 @@ function emptyNode(text) {
 function renderCollect(items) {
   collectList.innerHTML = "";
   if (!items.length) {
-    collectList.appendChild(emptyNode("还没有记录到新增加的 group"));
+    collectList.appendChild(emptyNode("还没有监听中的群组"));
     return;
   }
 
@@ -41,17 +44,42 @@ function renderCollect(items) {
     card.className = "card";
     const keywords = (item.source_keywords || []).join(", ");
     const links = (item.source_links || []).join(", ");
+    const statusText = item.added_this_run ? "本轮新加入" : "已在监听";
+    const badge = item.added_this_run ? '<span class="mini-badge">NEW</span>' : "";
     card.innerHTML = `
       <div class="card-title-row">
         <div class="card-title">${item.title || item.username || item.chat_id}</div>
+        ${badge}
       </div>
       <div class="card-meta">chat_id: ${item.chat_id}
 username: ${item.username || "-"}
-time: ${formatTime(item.timestamp)}
+status: ${statusText}
+last_added_at: ${formatTime(item.last_added_at)}
 keywords: ${keywords || "-"}
 source_links: ${links || "-"}</div>
     `;
     collectList.appendChild(card);
+  });
+}
+
+function renderMetrics(metrics) {
+  metricsGrid.innerHTML = "";
+  const items = [
+    ["监听群组总数", metrics.monitored_groups_total ?? 0],
+    ["本次新加入群组", metrics.collect_new_groups_this_run ?? 0],
+    ["本次报告命中数", metrics.reports_this_run ?? 0],
+    ["命中频率", `${metrics.report_hit_rate_per_hour ?? 0} 条/小时`],
+    ["本次监听消息数", metrics.incoming_messages_this_run ?? 0],
+    ["本次活跃群组数", metrics.active_groups_this_run ?? 0],
+  ];
+  items.forEach(([label, value]) => {
+    const card = document.createElement("div");
+    card.className = "metric-card";
+    card.innerHTML = `
+      <div class="metric-label">${label}</div>
+      <div class="metric-value">${value}</div>
+    `;
+    metricsGrid.appendChild(card);
   });
 }
 
@@ -135,12 +163,13 @@ latest: ${formatTime(group.latest_generated_at)}</div>
 
 function renderListen(events) {
   listenList.innerHTML = "";
-  if (!events.length) {
+  const recentEvents = (events || []).slice(0, MAX_LISTEN_EVENTS);
+  if (!recentEvents.length) {
     listenList.appendChild(emptyNode("还没有实时监听事件"));
     return;
   }
 
-  events.forEach((event) => {
+  recentEvents.forEach((event) => {
     const card = document.createElement("div");
     card.className = "card";
     const tag = document.createElement("div");
@@ -182,11 +211,12 @@ function renderPipelineStatus(status) {
   }
   const steps = (status.steps || []).join(", ") || "-";
   const maxJoins = status.max_joins ?? "-";
+  const groupBufferMaxMessages = status.group_buffer_max_messages ?? "-";
   if (status.running) {
-    pipelineStatus.textContent = `运行中 · steps=${steps} · max_joins=${maxJoins} · pid=${status.pid} · started_at=${formatTime(status.started_at)}`;
+    pipelineStatus.textContent = `运行中 · steps=${steps} · max_joins=${maxJoins} · buffer=${groupBufferMaxMessages} · pid=${status.pid} · started_at=${formatTime(status.started_at)}`;
     startButton.disabled = true;
   } else if (status.started_at) {
-    pipelineStatus.textContent = `已结束 · steps=${steps} · max_joins=${maxJoins} · exit_code=${status.exit_code} · started_at=${formatTime(status.started_at)} · finished_at=${formatTime(status.finished_at)}`;
+    pipelineStatus.textContent = `已结束 · steps=${steps} · max_joins=${maxJoins} · buffer=${groupBufferMaxMessages} · exit_code=${status.exit_code} · started_at=${formatTime(status.started_at)} · finished_at=${formatTime(status.finished_at)}`;
     startButton.disabled = false;
   } else {
     pipelineStatus.textContent = "尚未启动";
@@ -234,10 +264,11 @@ async function loadStartupConfig() {
     keywordsText.value = data.keywords_text || "";
     detectorText.value = data.detector_description_text || "";
     maxJoinsInput.value = data.default_max_joins ?? 5;
+    groupBufferMaxMessagesInput.value = data.default_group_buffer_max_messages ?? 8;
     const autoJoinText = data.collect_auto_join_enabled
       ? "collect 阶段默认会自动加入搜到的公开群组。"
       : "collect 阶段当前不会自动加入搜到的公开群组。";
-    configStatus.textContent = `${autoJoinText} 本次最大加群数默认是 ${maxJoinsInput.value}。`;
+    configStatus.textContent = `${autoJoinText} 本次最大加群数默认是 ${maxJoinsInput.value}，群消息缓冲条数默认是 ${groupBufferMaxMessagesInput.value}。`;
   } catch (error) {
     configStatus.textContent = "无法加载开始界面配置";
   }
@@ -257,7 +288,7 @@ async function saveStartupConfig() {
       configStatus.textContent = data.error || "保存失败";
       return false;
     }
-    configStatus.textContent = `已保存。collect 阶段默认会自动加入搜到的公开群组。本次最大加群数是 ${maxJoinsInput.value}。`;
+    configStatus.textContent = `已保存。collect 阶段默认会自动加入搜到的公开群组。本次最大加群数是 ${maxJoinsInput.value}，群消息缓冲条数是 ${groupBufferMaxMessagesInput.value}。`;
     return true;
   } catch (error) {
     configStatus.textContent = "保存失败";
@@ -278,6 +309,11 @@ async function startPipelineRun() {
     configStatus.textContent = "本次最大加群数需要是大于等于 0 的整数";
     return;
   }
+  const groupBufferMaxMessages = Number.parseInt(groupBufferMaxMessagesInput.value, 10);
+  if (Number.isNaN(groupBufferMaxMessages) || groupBufferMaxMessages <= 0) {
+    configStatus.textContent = "群消息缓冲条数需要是大于 0 的整数";
+    return;
+  }
   const saved = await saveStartupConfig();
   if (!saved) return;
   startButton.disabled = true;
@@ -286,7 +322,7 @@ async function startPipelineRun() {
     const response = await fetch("/api/pipeline/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ steps, max_joins: maxJoins }),
+      body: JSON.stringify({ steps, max_joins: maxJoins, group_buffer_max_messages: groupBufferMaxMessages }),
     });
     const data = await response.json();
     if (!response.ok || !data.ok) {
@@ -307,9 +343,10 @@ async function refreshDashboard() {
     refreshStatus.textContent = "刷新中...";
     const response = await fetch("/api/dashboard", { cache: "no-store" });
     const data = await response.json();
-    renderCollect(data.collect_groups || []);
+    renderCollect(data.monitored_groups || []);
     renderAnalyze(data.analyze_groups || []);
     renderListen(data.listen_events || []);
+    renderMetrics(data.metrics || {});
     refreshStatus.textContent = `已刷新 ${new Date().toLocaleTimeString()}`;
   } catch (error) {
     refreshStatus.textContent = "刷新失败";

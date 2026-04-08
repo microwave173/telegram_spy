@@ -39,7 +39,7 @@ ENABLE_REPLY = os.getenv("TELETHON_TALK_ENABLE_REPLY", "0") == "1"
 
 # 群聊批处理参数
 GROUP_PROCESS_INTERVAL_SECONDS = 5
-GROUP_BUFFER_MAX_MESSAGES = 8
+GROUP_BUFFER_MAX_MESSAGES = int(os.getenv("TELEGRAM_GROUP_BUFFER_MAX_MESSAGES", "8"))
 GROUP_TRIGGER_NAMES = tuple(
     x.strip() for x in os.getenv("TELEGRAM_GROUP_TRIGGER_NAMES", "李").split(",") if x.strip()
 )

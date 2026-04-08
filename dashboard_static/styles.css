@@ -237,6 +237,53 @@ body {
   white-space: pre-wrap;
 }
 
+.metrics-panel {
+  margin: 0 28px 12px;
+  padding: 18px 20px;
+  border-radius: 22px;
+  border: 1px solid rgba(230, 217, 200, 0.75);
+  background: rgba(255, 253, 248, 0.88);
+  box-shadow: var(--shadow);
+}
+
+.metrics-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.metrics-header h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metric-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.metric-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.metric-value {
+  margin-top: 8px;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
 .column {
   background: rgba(255, 253, 248, 0.82);
   border: 1px solid rgba(230, 217, 200, 0.75);
@@ -267,6 +314,18 @@ body {
   gap: 12px;
 }
 
+.stack > * {
+  flex-shrink: 0;
+}
+
+#collect-list,
+#analyze-list,
+#listen-list {
+  max-height: calc(100vh - 340px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -291,6 +350,20 @@ body {
   font-size: 13px;
   color: var(--muted);
   white-space: pre-line;
+}
+
+.mini-badge {
+  min-width: 44px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 8px;
 }
 
 .group-card {
@@ -373,11 +446,21 @@ body {
 }
 
 @media (max-width: 1100px) {
+  .metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .launch-grid {
     grid-template-columns: 1fr;
   }
 
   .board {
     grid-template-columns: 1fr;
+  }
+
+  #collect-list,
+  #analyze-list,
+  #listen-list {
+    max-height: none;
   }
 }

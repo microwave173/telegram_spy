@@ -59,6 +59,12 @@ def append_listen_event(entry: dict) -> None:
     save_dashboard_state(state)
 
 
+def clear_listen_events() -> None:
+    state = load_dashboard_state()
+    state["listen_events"] = []
+    save_dashboard_state(state)
+
+
 def load_dashboard_read_state() -> dict:
     return _load_json(
         DASHBOARD_READ_STATE_PATH,
