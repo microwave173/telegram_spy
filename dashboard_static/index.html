@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Telegram Spy Dashboard</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Telegram Spy Dashboard</h1>
+        <p>Collect / Analyze / Listen 三阶段可视化</p>
+      </div>
+      <div class="status-pill" id="refresh-status">加载中...</div>
+    </header>
+
+    <section class="launch-panel">
+      <div class="launch-copy">
+        <h2>开始界面</h2>
+        <p>先在这里改关键词和检测描述，再勾选阶段并开始执行。</p>
+      </div>
+      <div class="launch-controls">
+        <label class="check"><input type="checkbox" id="step-collect" checked> collect</label>
+        <label class="check"><input type="checkbox" id="step-analyze" checked> analyze</label>
+        <label class="check"><input type="checkbox" id="step-listen"> listen</label>
+        <label class="field-inline">本次最大加群数
+          <input type="number" id="max-joins" min="0" step="1" value="5">
+        </label>
+        <button id="save-config-button" class="secondary-button">保存配置</button>
+        <button id="start-button" class="start-button">开始执行</button>
+      </div>
+      <div class="launch-grid">
+        <label class="editor-block">
+          <span class="editor-title">关键词 `keywords.txt`</span>
+          <textarea id="keywords-text" class="editor-textarea" placeholder="一行一个关键词"></textarea>
+        </label>
+        <label class="editor-block">
+          <span class="editor-title">检测描述 `detector_description.txt`</span>
+          <textarea id="detector-text" class="editor-textarea editor-textarea-large" placeholder="写清楚你想让模型检测和摘抄什么"></textarea>
+        </label>
+      </div>
+      <div id="config-status" class="config-status">collect 阶段默认会自动加入搜到的公开群组。</div>
+      <div id="pipeline-status" class="pipeline-status">尚未启动</div>
+    </section>
+
+    <section class="log-panel">
+      <div class="log-header">
+        <h2>运行日志</h2>
+        <span class="column-subtitle">显示当前这一轮 pipeline 的最新输出</span>
+      </div>
+      <pre id="pipeline-log" class="log-viewer">还没有日志输出</pre>
+    </section>
+
+    <main class="board">
+      <section class="column">
+        <div class="column-header">
+          <h2>Collect</h2>
+          <span class="column-subtitle">新增加的群组</span>
+        </div>
+        <div id="collect-list" class="stack"></div>
+      </section>
+
+      <section class="column column-analyze">
+        <div class="column-header">
+          <h2>Analyze</h2>
+          <span class="column-subtitle">按群组归档的报告</span>
+        </div>
+        <div id="analyze-list" class="stack"></div>
+      </section>
+
+      <section class="column">
+        <div class="column-header">
+          <h2>Listen</h2>
+          <span class="column-subtitle">实时监听事件</span>
+        </div>
+        <div id="listen-list" class="stack"></div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

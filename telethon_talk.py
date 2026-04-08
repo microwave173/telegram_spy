@@ -8,6 +8,7 @@ from pathlib import Path
 from openai import OpenAI
 from telethon import TelegramClient, events
 
+from dashboard_state import append_listen_event, utc_now_iso
 from reporting_utils import (
     generate_detection_report,
     load_detector_description,
@@ -183,6 +184,15 @@ def log_incoming_message(chat_type: str, chat_id: int, text: str):
     if len(preview) > 80:
         preview = preview[:77] + "..."
     print(f"[incoming][{chat_type}] chat_id={chat_id} text={preview}")
+    append_listen_event(
+        {
+            "timestamp": utc_now_iso(),
+            "event_type": "incoming",
+            "chat_type": chat_type,
+            "chat_id": chat_id,
+            "text": preview,
+        }
+    )
 
 
 def render_group_rows_for_prompt(message_rows: list[dict]) -> str:
@@ -215,8 +225,26 @@ async def analyze_and_write_group_report(chat_id: int, message_rows: list[dict],
             message_rows,
         )
         print(f"report_written {report_path}")
+        append_listen_event(
+            {
+                "timestamp": utc_now_iso(),
+                "event_type": "report_written",
+                "chat_type": "group",
+                "chat_id": chat_id,
+                "text": f"report_written {report_path.name}",
+            }
+        )
     except Exception as e:
         print(f"report_error {chat_id} {type(e).__name__}: {e}")
+        append_listen_event(
+            {
+                "timestamp": utc_now_iso(),
+                "event_type": "report_error",
+                "chat_type": "group",
+                "chat_id": chat_id,
+                "text": f"{type(e).__name__}: {e}",
+            }
+        )
 
 
 async def run_ai_turn(chat_id: int, user_content: str, reply_callback):

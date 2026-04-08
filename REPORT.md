@@ -34,12 +34,15 @@ haoka
 - 一行一个
 - 可以写 `@用户名`
 - 也可以写 `https://t.me/...`
+- 也可以直接写 `https://tgstat.org/...`
+- 甚至可以直接粘贴 TGStat 页面里带 `Username: @...` 的文本
 
 示例：
 
 ```text
 @python
 https://t.me/pythontelegrambotgroup
+https://tgstat.org/bestoftelegram/channels/20/food-health/
 ```
 
 如果你没有现成链接，这个文件可以留空。

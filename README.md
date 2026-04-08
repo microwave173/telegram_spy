@@ -1,5 +1,13 @@
 # telegram_bot
 
+这是一个基于 Telethon 和 Qwen 的 Telegram 群组发现、历史分析和实时监听工具集。
+
+它主要用来完成三件事：
+
+- 搜索并加入公开群组
+- 对已加入或已监听群组的历史消息做内容分析并生成报告
+- 对目标私聊和群组做持续监听，在实时消息中继续发现线索并输出报告
+
 这个目录里目前主要有三个可直接使用的脚本：
 
 - `telethon_talk.py`
@@ -152,7 +160,7 @@ bash run_pipeline.sh --steps collect,analyze --history-limit 300 --max-joins 10
 - `keywords.txt`
   - 搜索公开群的关键词，一行一个
 - `candidate_links.txt`
-  - 从 TGStat 或其他目录站整理来的候选 `@username` 或 `t.me/...`
+  - 从 TGStat 或其他目录站整理来的候选 `@username`、`t.me/...`、TGStat 页面 URL，甚至可直接粘贴部分 TGStat 页面文本
 - `seen_groups.json`
   - 搜索/加群脚本的状态文件
 - `detector_description.txt`
@@ -230,7 +238,15 @@ travel
 ```text
 @python
 https://t.me/pythontelegrambotgroup
+https://tgstat.org/bestoftelegram/channels/20/food-health/
 ```
+
+现在 `candidate_links.txt` 不只支持 Telegram 链接，也支持：
+
+- `@username`
+- `https://t.me/...`
+- `https://tgstat.org/...`
+- 从 TGStat 页面复制出来的带 `Username: @...` 的文本行
 
 ### 最简单运行
 

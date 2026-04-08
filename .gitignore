@@ -8,5 +8,9 @@ telethon_user_session.session
 telethon_user_session.session-journal
 
 bak/
+old/
 reports/
 report.txt
+dashboard_state.json
+dashboard_read_state.json
+dashboard_pipeline.log

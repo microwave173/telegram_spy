@@ -18,11 +18,17 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.request import Request, urlopen
 
 from telethon import TelegramClient, functions, types, utils
 from telethon.errors import InviteRequestSentError, UserAlreadyParticipantError
 
+from dashboard_state import append_collect_group, utc_now_iso
+
 TME_LINK_RE = re.compile(r"(https?://t\.me/[^\s<>()]+|t\.me/[^\s<>()]+)", re.IGNORECASE)
+TGSTAT_URL_RE = re.compile(r"https?://(?:www\.)?tgstat\.(?:org|com)/[^\s<>()]+", re.IGNORECASE)
+TGSTAT_USERNAME_RE = re.compile(r"Username:\s*@([A-Za-z][A-Za-z0-9_]{3,})", re.IGNORECASE)
+AT_USERNAME_RE = re.compile(r"(?<![\w/])@([A-Za-z][A-Za-z0-9_]{3,})")
 
 
 def read_api_credentials(keys_path: Path) -> tuple[int, str]:
@@ -84,17 +90,79 @@ def canonicalize_tme_link(link: str) -> str:
     return f"https://t.me/{normalized}"
 
 
+def normalize_public_username(raw_username: str) -> str | None:
+    username = raw_username.strip()
+    if username.startswith("@"):
+        username = username[1:]
+    if not username:
+        return None
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{3,}", username):
+        return None
+    return username
+
+
 def to_public_username_ref(raw_ref: str) -> str | None:
     normalized = normalize_tme_link(raw_ref)
-    if normalized.startswith("@"):
-        normalized = normalized[1:]
-    if not normalized:
-        return None
     if normalized.startswith("+") or normalized.startswith("joinchat/"):
         return None
-    if "/" in normalized:
-        return None
-    return normalized
+    username = normalized.split("/", 1)[0]
+    return normalize_public_username(username)
+
+
+def extract_candidate_usernames_from_text(text: str) -> set[str]:
+    usernames = set()
+
+    for match in TME_LINK_RE.finditer(text):
+        username = to_public_username_ref(match.group(0).rstrip(".,;!?"))
+        if username:
+            usernames.add(username)
+
+    for match in TGSTAT_USERNAME_RE.finditer(text):
+        username = normalize_public_username(match.group(1))
+        if username:
+            usernames.add(username)
+
+    for match in AT_USERNAME_RE.finditer(text):
+        username = normalize_public_username(match.group(1))
+        if username:
+            usernames.add(username)
+
+    return usernames
+
+
+def fetch_tgstat_page_text(url: str) -> str:
+    request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urlopen(request, timeout=20) as response:
+        return response.read().decode("utf-8", "ignore")
+
+
+def resolve_candidate_usernames(raw_item: str, tgstat_cache: dict[str, set[str]]) -> tuple[set[str], list[str]]:
+    usernames = set()
+    notes = []
+
+    direct_usernames = extract_candidate_usernames_from_text(raw_item)
+    if direct_usernames:
+        usernames.update(direct_usernames)
+        notes.append(f"direct={len(direct_usernames)}")
+
+    tgstat_urls = [match.group(0).rstrip(".,;!?") for match in TGSTAT_URL_RE.finditer(raw_item)]
+    for tgstat_url in tgstat_urls:
+        if tgstat_url in tgstat_cache:
+            fetched_usernames = tgstat_cache[tgstat_url]
+        else:
+            try:
+                fetched_text = fetch_tgstat_page_text(tgstat_url)
+                fetched_usernames = extract_candidate_usernames_from_text(fetched_text)
+            except Exception as e:
+                fetched_usernames = set()
+                notes.append(f"tgstat_fetch_error={type(e).__name__}")
+            tgstat_cache[tgstat_url] = fetched_usernames
+
+        if fetched_usernames:
+            usernames.update(fetched_usernames)
+            notes.append(f"tgstat={len(fetched_usernames)}")
+
+    return usernames, notes
 
 
 def load_seen_state(path: Path) -> dict:
@@ -499,13 +567,24 @@ async def async_main() -> None:
                     merge_candidate_username(candidate_map, username, "keyword", keyword)
                     set_candidate_parent(candidate_map, username, None, 0)
 
+        tgstat_cache = {}
+        imported_candidate_count = 0
         for raw_link in candidate_links:
-            username = to_public_username_ref(raw_link)
-            if not username:
-                print(f"Skipping unsupported candidate link: {raw_link}")
+            usernames, notes = resolve_candidate_usernames(raw_link, tgstat_cache)
+            if not usernames:
+                print(f"Skipping unsupported candidate input: {raw_link}")
                 continue
-            merge_candidate_username(candidate_map, username, "link", canonicalize_tme_link(raw_link))
-            set_candidate_parent(candidate_map, username, None, 0)
+
+            imported_candidate_count += len(usernames)
+            for username in usernames:
+                merge_candidate_username(candidate_map, username, "link", raw_link)
+                set_candidate_parent(candidate_map, username, None, 0)
+
+            if notes:
+                print(f"Imported from candidate input: {raw_link} ({', '.join(notes)})")
+
+        if candidate_links:
+            print(f"Imported {imported_candidate_count} candidate username(s) from candidate inputs.")
 
         print(f"\nCollected {len(candidate_map)} unique public candidate group(s).")
 
@@ -577,6 +656,18 @@ async def async_main() -> None:
                 print(
                     f"Fetched {inspection['messages_fetched']} message(s), extracted {len(inspection['tme_links'])} t.me link(s), depth={inspection['depth']}."
                 )
+
+                if join_status == "joined":
+                    append_collect_group(
+                        {
+                            "timestamp": utc_now_iso(),
+                            "chat_id": inspection.get("listen_chat_id") or inspection["id"],
+                            "title": inspection["title"],
+                            "username": inspection["username"],
+                            "source_keywords": metadata["source_keywords"],
+                            "source_links": metadata["source_links"],
+                        }
+                    )
 
                 if args.add_to_listen_targets and join_status in {"joined", "already_member"}:
                     if add_group_id_to_listen_targets(
