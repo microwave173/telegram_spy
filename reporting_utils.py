@@ -5,6 +5,8 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dashboard_state import increment_group_hit_count
+
 NO_MATCH_SENTINEL = "NO_MATCH"
 
 
@@ -132,4 +134,5 @@ def write_report_file(
         + "\n"
     )
     report_path.write_text(body, encoding="utf-8")
+    increment_group_hit_count(chat_id, chat_title)
     return report_path

@@ -14,7 +14,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from dashboard_state import clear_listen_events, load_dashboard_read_state, load_dashboard_state, mark_chat_reports_read
+from dashboard_state import (
+    clear_listen_events,
+    load_dashboard_read_state,
+    load_dashboard_state,
+    mark_chat_reports_read,
+    reset_group_hit_counts_with_backup,
+    seed_group_hit_counts_from_reports,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 REPORTS_DIR = BASE_DIR / "reports"
@@ -164,6 +171,7 @@ def build_monitored_groups(
     collect_groups: list[dict],
     reports: list[dict],
     window_start: datetime | None,
+    dashboard_state: dict,
 ) -> list[dict]:
     listen_targets = load_listen_targets()
     seen_groups = load_seen_groups()
@@ -185,6 +193,7 @@ def build_monitored_groups(
         title_by_chat_id[chat_id] = report.get("chat_title") or title_by_chat_id.get(chat_id)
 
     processed_groups = seen_groups.get("processed_groups", {})
+    hit_counts = dashboard_state.get("group_hit_counts", {})
     if isinstance(processed_groups, dict):
         for item in processed_groups.values():
             if not isinstance(item, dict):
@@ -215,6 +224,7 @@ def build_monitored_groups(
                 "chat_id": chat_id,
                 "title": title_by_chat_id.get(chat_id) or str(chat_id),
                 "username": username_by_chat_id.get(chat_id) or "",
+                "hit_count": int(hit_counts.get(str(chat_id), {}).get("count", 0) or 0),
                 "added_this_run": added_this_run,
                 "last_added_at": latest_entry.get("timestamp") if latest_entry else "",
                 "source_keywords": latest_entry.get("source_keywords", []) if latest_entry else [],
@@ -224,6 +234,7 @@ def build_monitored_groups(
 
     monitored_groups.sort(
         key=lambda item: (
+            -item["hit_count"],
             0 if item["added_this_run"] else 1,
             item["title"].lower(),
         )
@@ -272,13 +283,14 @@ def build_metrics(
 
 
 def build_dashboard_payload() -> dict:
+    reports = load_reports()
+    seed_group_hit_counts_from_reports(reports)
     dashboard_state = load_dashboard_state()
     collect_groups = list(reversed(dashboard_state.get("collect_groups", [])))
     listen_events = list(reversed(dashboard_state.get("listen_events", [])))
-    reports = load_reports()
     pipeline_status = get_pipeline_status()
     window_start = parse_iso_datetime(pipeline_status.get("started_at"))
-    monitored_groups = build_monitored_groups(collect_groups, reports, window_start)
+    monitored_groups = build_monitored_groups(collect_groups, reports, window_start, dashboard_state)
     return {
         "collect_groups": collect_groups,
         "monitored_groups": monitored_groups,
@@ -529,6 +541,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             mark_chat_reports_read(chat_id)
             self._send_json({"ok": True, "chat_id": chat_id})
             return
+        if parsed.path == "/api/hit-counts/reset":
+            try:
+                result = reset_group_hit_counts_with_backup()
+                self._send_json({"ok": True, **result})
+                return
+            except Exception as e:
+                self._send_json({"ok": False, "error": f"{type(e).__name__}: {e}"}, status=500)
+                return
         if parsed.path == "/api/config/startup":
             try:
                 content_length = int(self.headers.get("Content-Length", "0"))

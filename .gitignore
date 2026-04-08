@@ -14,3 +14,4 @@ report.txt
 dashboard_state.json
 dashboard_read_state.json
 dashboard_pipeline.log
+hit_count_backups/

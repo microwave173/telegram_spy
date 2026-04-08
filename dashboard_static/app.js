@@ -9,6 +9,7 @@ const maxJoinsInput = document.getElementById("max-joins");
 const groupBufferMaxMessagesInput = document.getElementById("group-buffer-max-messages");
 const saveConfigButton = document.getElementById("save-config-button");
 const startButton = document.getElementById("start-button");
+const resetHitCountsButton = document.getElementById("reset-hit-counts-button");
 const pipelineStatus = document.getElementById("pipeline-status");
 const configStatus = document.getElementById("config-status");
 const keywordsText = document.getElementById("keywords-text");
@@ -53,6 +54,7 @@ function renderCollect(items) {
       </div>
       <div class="card-meta">chat_id: ${item.chat_id}
 username: ${item.username || "-"}
+detect_hits: ${item.hit_count ?? 0}
 status: ${statusText}
 last_added_at: ${formatTime(item.last_added_at)}
 keywords: ${keywords || "-"}
@@ -354,8 +356,27 @@ async function refreshDashboard() {
   }
 }
 
+async function resetHitCounts() {
+  resetHitCountsButton.disabled = true;
+  try {
+    const response = await fetch("/api/hit-counts/reset", { method: "POST" });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      configStatus.textContent = data.error || "清零失败";
+      return;
+    }
+    configStatus.textContent = `命中次数已清零，已备份 ${data.backed_up_groups} 个群到 ${data.backup_path}`;
+    await refreshDashboard();
+  } catch (error) {
+    configStatus.textContent = "清零失败";
+  } finally {
+    resetHitCountsButton.disabled = false;
+  }
+}
+
 saveConfigButton.addEventListener("click", saveStartupConfig);
 startButton.addEventListener("click", startPipelineRun);
+resetHitCountsButton.addEventListener("click", resetHitCounts);
 
 loadStartupConfig();
 refreshDashboard();
