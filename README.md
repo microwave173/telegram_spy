@@ -33,6 +33,25 @@ pip install telethon openai
 - `bot_key.txt`（Qwen API Key）
 - `telethon_user_session.session`（首次登录后生成）
 
+#### 如何申请 `api_id` 和 `api_hash`
+
+`api_id` / `api_hash` 不是 Telethon 自动生成的，需要到 Telegram 官方开发者页面申请：
+
+1. 打开 `https://my.telegram.org`
+2. 使用手机号登录
+3. 进入 `API development tools`
+4. 创建一个应用（填写应用名等信息）
+5. 页面会显示 `api_id` 和 `api_hash`
+
+将它们写入 `keys.txt`：
+
+```txt
+api_id: 12345678
+api_hash: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+注意：`api_hash` 属于敏感密钥，不要泄露，也不要提交到公开仓库。
+
 ### 3) 常见用法
 
 完整流水线：
