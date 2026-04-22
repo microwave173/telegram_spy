@@ -39,6 +39,61 @@
 pip install telethon openai
 ```
 
+## Dashboard（可视化控制台）
+
+项目现在支持一个本地 Dashboard，用来在浏览器里可视化并控制 `collect / analyze / listen` 三阶段流程。
+
+### 快速启动
+
+```bash
+python3 dashboard_server.py
+```
+
+默认地址：
+
+- `http://127.0.0.1:8765`
+
+可选参数：
+
+```bash
+python3 dashboard_server.py --host 0.0.0.0 --port 8765
+```
+
+### Dashboard 里可以做什么
+
+- 在“开始界面”里直接编辑并保存：
+  - `keywords.txt`
+  - `detector_description.txt`
+- 勾选要执行的步骤（`collect` / `analyze` / `listen`）后，一键启动 pipeline
+- 按本次运行覆盖：
+  - 最大加群数（`max_joins`）
+  - 群消息缓冲条数（`TELEGRAM_GROUP_BUFFER_MAX_MESSAGES`）
+- 实时查看：
+  - pipeline 运行状态与日志
+  - Collect / Analyze / Listen 三列数据
+  - 本轮测试指标
+- 对 Analyze 列按群查看报告，展开后自动标记已读
+- 一键清零命中次数（会先自动备份）
+
+### Dashboard 数据来源（和脚本的关系）
+
+- Collect 列
+  - 由 `listen_targets.json` + `seen_groups.json` + `dashboard_state.json` 的 `collect_groups` 合并得到
+- Analyze 列
+  - 直接来自 `reports/*.txt`，按 `chat_id` 分组
+  - 已读状态来自 `dashboard_read_state.json`
+- Listen 列
+  - 来自 `dashboard_state.json` 的 `listen_events`
+  - 事件由 `telethon_talk.py` 在实时监听过程中写入
+- 命中次数
+  - 由 `reporting_utils.py` 在每次写报告时递增并写入 `dashboard_state.json`
+
+### 说明
+
+- Dashboard 启动 pipeline 时，底层仍然调用 `run_pipeline.sh`
+- 目前 Dashboard UI 没有 `allow-talk` 开关；如果需要 bot 在群里实际发言，请用命令行：
+  - `bash run_pipeline.sh --steps collect,analyze,listen --allow-talk`
+
 ## 推荐入口
 
 如果你想用一条命令串起整个流程，直接用：
@@ -167,6 +222,18 @@ bash run_pipeline.sh --steps collect,analyze --history-limit 300 --max-joins 10
   - 你要让大模型检测什么内容，就改这个文件
 - `reports/`
   - Qwen 生成的命中报告会写到这里
+- `dashboard_server.py`
+  - Dashboard 后端服务（HTTP API + 静态页面）
+- `dashboard_static/`
+  - Dashboard 前端静态资源（`index.html` / `app.js` / `styles.css`）
+- `dashboard_state.py`
+  - Dashboard 状态读写工具
+- `dashboard_state.json`
+  - Dashboard 运行态数据（collect/listen 事件、命中计数）
+- `dashboard_read_state.json`
+  - Analyze 列的按群已读状态
+- `hit_count_backups/`
+  - 命中计数清零时自动生成的备份
 
 ## 1. telethon_talk.py
 
