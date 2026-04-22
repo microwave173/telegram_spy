@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -75,6 +76,49 @@ def load_targets_file(path: Path) -> list[str]:
     return items
 
 
+def resolve_book_path(raw: str) -> Path:
+    path = Path(raw)
+    if not path.is_absolute():
+        path = BASE_DIR / path
+    return path.resolve()
+
+
+def load_target_book(path: Path) -> dict:
+    if not path.exists():
+        return {"groups": {}}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"target book must be a JSON object: {path}")
+    groups = data.get("groups", {})
+    if not isinstance(groups, dict):
+        raise ValueError(f"target book field 'groups' must be an object: {path}")
+    normalized_groups = {}
+    for group_name, group_targets in groups.items():
+        if not isinstance(group_name, str):
+            raise ValueError("target group name must be string")
+        if not isinstance(group_targets, list):
+            raise ValueError(f"target group '{group_name}' must be a list")
+        cleaned = []
+        for item in group_targets:
+            if not isinstance(item, str):
+                raise ValueError(f"target in group '{group_name}' must be string")
+            value = item.strip()
+            if value:
+                cleaned.append(value)
+        normalized_groups[group_name] = cleaned
+    return {"groups": normalized_groups}
+
+
+def print_target_book_groups(path: Path, target_book: dict) -> None:
+    groups = target_book.get("groups", {})
+    print(f"target_book={path}")
+    if not groups:
+        print("(no groups)")
+        return
+    for name in sorted(groups):
+        print(f"- {name}: {len(groups[name])} target(s)")
+
+
 def looks_like_chat_id(token: str) -> bool:
     return re.fullmatch(r"-?\d+", token) is not None
 
@@ -106,6 +150,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--targets-file", help="File with one target per line")
     parser.add_argument("--target-ids", help="Comma-separated numeric chat IDs")
     parser.add_argument(
+        "--groups",
+        help="Comma-separated target group names loaded from --target-book",
+    )
+    parser.add_argument(
+        "--target-book",
+        default="send_target_groups.json",
+        help="JSON file storing target groups (default: send_target_groups.json)",
+    )
+    parser.add_argument(
         "--match-mode",
         choices=["exact", "contains"],
         default="exact",
@@ -135,6 +188,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--list-dialogs", action="store_true", help="List visible dialogs and exit")
     parser.add_argument("--list-limit", type=int, default=200, help="Max dialogs printed with --list-dialogs (default: 200)")
+    parser.add_argument("--show-groups", action="store_true", help="Show groups from --target-book and exit")
     return parser.parse_args()
 
 
@@ -303,6 +357,13 @@ async def main() -> None:
     if args.schedule_at and args.schedule_in:
         raise ValueError("--schedule-in and --schedule-at are mutually exclusive")
 
+    book_path = resolve_book_path(args.target_book)
+    target_book = load_target_book(book_path)
+    if args.show_groups:
+        print_target_book_groups(book_path, target_book)
+        if not args.list_dialogs:
+            return
+
     text = load_message(args)
     files = normalize_path_list(args.files)
     images = normalize_path_list(args.images)
@@ -330,6 +391,13 @@ async def main() -> None:
                 file_path = BASE_DIR / file_path
             target_tokens.extend(load_targets_file(file_path))
         target_tokens.extend(parse_csv_items(args.target_ids))
+        group_names = parse_csv_items(args.groups)
+        for group_name in group_names:
+            group_targets = target_book.get("groups", {}).get(group_name)
+            if group_targets is None:
+                raise ValueError(f"group not found in target book: {group_name!r}")
+            print(f"loaded_group={group_name} targets={len(group_targets)}")
+            target_tokens.extend(group_targets)
 
         targets = await resolve_targets(client, target_tokens, args.match_mode)
         print(f"resolved_targets={len(targets)}")

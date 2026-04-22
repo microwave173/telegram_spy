@@ -195,6 +195,8 @@ python3 telethon_send_cli.py [options]
 - `--targets`：逗号分隔目标（显示名、`@username`、`t.me/...`、chat_id）
 - `--targets-file`：每行一个目标
 - `--target-ids`：逗号分隔 chat_id
+- `--groups`：逗号分隔分组名（从 `--target-book` 读取）
+- `--target-book`：分组 JSON 文件（默认 `send_target_groups.json`）
 - `--match-mode exact|contains`：显示名匹配模式（默认 `exact`）
 
 ### 发送内容参数
@@ -215,13 +217,16 @@ python3 telethon_send_cli.py [options]
 
 - `--list-dialogs`：列出可见会话后退出
 - `--list-limit N`：列表上限（默认 `200`）
+- `--show-groups`：展示 `--target-book` 里的分组并退出
 - `--proxy-host` / `--proxy-port`
 
 ### 常用示例
 
 ```bash
 python3 telethon_send_cli.py --list-dialogs
+python3 telethon_send_cli.py --show-groups
 python3 telethon_send_cli.py --targets "传 李" --message "hello"
+python3 telethon_send_cli.py --groups ops_daily --target-book send_target_groups.json --message "daily ping"
 python3 telethon_send_cli.py --targets "传 李,@mygroup" --file candidate_links.txt --image image.png
 python3 telethon_send_cli.py --targets-file targets.txt --message "ping" --schedule-in 60
 python3 telethon_send_cli.py --targets "传 李" --message "heartbeat" --repeat 5 --interval-seconds 30
@@ -240,3 +245,20 @@ python3 telethon_send_cli.py --targets "传 李" --message "heartbeat" --repeat 
 5. 可视化人工值守：调用 `dashboard_server.py`
 
 推荐把每个 CLI 的输入参数都标准化成 JSON，再转换成 shell 参数执行。
+
+推荐把批量发送目标维护在：
+
+- `send_target_groups.json`
+
+格式示例：
+
+```json
+{
+  "groups": {
+    "ops_daily": ["传 李", "-1002069074753"],
+    "test_groups": ["-1002069074753"]
+  }
+}
+```
+
+这样用户只需要说一句“给 ops_daily 发 xxx”，agent 就能映射到 `--groups ops_daily` 调用发送脚本。
