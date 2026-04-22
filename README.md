@@ -15,9 +15,9 @@
 
 `SKILL.md` 定义了：
 
-- agent 该如何调用本仓库脚本
-- 如何通过 `send_target_groups.json` 做“分组批量发送”
-- 如何实现“用户一句话 -> agent 自动映射分组 -> 执行发送”
+- agent 如何统一编排 `collect / analyze / listen / dashboard / send`
+- 各 CLI 脚本在什么场景下调用、如何组合成完整流程
+- 如何用 `send_target_groups.json` 做分组批量发送与一句话触发
 
 ## 快速开始
 

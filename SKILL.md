@@ -13,7 +13,8 @@ Primary goals:
 
 1. Keep every operation scriptable and CLI-first.
 2. Support interactive user intent -> deterministic command execution.
-3. Enable "one sentence send" by mapping user categories to JSON-defined target groups.
+3. Cover end-to-end operations: discover, analyze, listen, dashboard, and outbound send.
+4. Enable "one sentence send" by mapping user categories to JSON-defined target groups.
 
 ## When To Use
 
@@ -37,6 +38,31 @@ Use this skill when the user asks to:
 For full parameter reference, read:
 
 - `CLI_SCRIPTS.md`
+
+## Credentials Bootstrap (api_id / api_hash)
+
+`api_id` and `api_hash` are required by Telethon and must be applied from Telegram official developer portal.
+
+Application steps:
+
+1. Open `https://my.telegram.org`
+2. Sign in with your phone number
+3. Go to `API development tools`
+4. Create an app (fill app name and basic info)
+5. Copy `api_id` and `api_hash`
+
+Write them to `keys.txt` in repo root:
+
+```txt
+api_id: 12345678
+api_hash: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+Agent responsibilities:
+
+1. If `keys.txt` is missing or invalid, guide user through the above steps.
+2. After user provides values, write/update `keys.txt` in the exact format.
+3. Warn user that `api_hash` is sensitive and must not be leaked or committed to public repos.
 
 ## Batch Send Model (Core)
 
